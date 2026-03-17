@@ -3,6 +3,11 @@ name = "sumo"
 version = "0.1.0"
 edition = "2021"
 description = "A fast, minimal CLI for querying Sumo Logic logs"
+license = "MIT"
+repository = "https://github.com/jstockdi/sumo"
+readme = "README.md"
+keywords = ["sumo-logic", "logs", "cli", "search"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }

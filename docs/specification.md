@@ -7,7 +7,7 @@ A fast, minimal command-line interface for querying Sumo Logic logs.
 - Query Sumo Logic logs from the terminal with simple, memorable commands
 - Support time-range searches (e.g., last 24h) for production monitoring
 - Output results in human-readable and machine-parseable formats
-- Work well as a building block in shell pipelines and Claude Code commands
+- Work well as a building block in shell pipelines and AI agent commands
 
 ## Non-Goals
 
@@ -176,7 +176,7 @@ sumo search [OPTIONS] <QUERY>
 
 | Argument | Description |
 |---|---|
-| `<QUERY>` | Sumo Logic search query string |
+| `<QUERY>` | Sumo Logic search query string (use single quotes in shell) |
 
 **Options:**
 
@@ -188,7 +188,7 @@ sumo search [OPTIONS] <QUERY>
 | `--limit` | `-l` | `100` | Max number of messages to return (max 10000) |
 | `--offset` | | `0` | Starting offset for pagination |
 | `--output` | `-o` | `text` | Output format: `text`, `json`, `csv` |
-| `--fields` | | (all) | Comma-separated list of fields to include |
+| `--fields` | | (all) | Comma-separated list of fields to include (works with all output formats) |
 | `--by-receipt-time` | | `false` | Use receipt time instead of message time |
 | `--raw` | `-r` | `false` | Output raw `_raw` field only (one message per line) |
 | `--poll-interval` | | `2` | Seconds between status polls |
@@ -209,23 +209,28 @@ Examples: `-15m`, `-24h`, `-7d`, `-2w`, `-30s`
 
 ```bash
 # Errors in the last 24 hours
-sumo search "error" -f -24h
+sumo search 'error' -f -24h
 
-# Errors from a specific source category
-sumo search '_sourceCategory=prod/plotzy/worker error' -f -24h
+# Filter by source category
+sumo search '_sourceCategory=prod/app/worker error' -f -24h
 
 # Count errors by source, output as JSON
-sumo search 'error | count by _sourceCategory' -f -24h -o json
+sumo search 'error | count by _sourceCategory' -f -24h -o json -q
 
-# Raw log lines only, pipe to grep
-sumo search '_sourceCategory=prod/plotzy/worker ERROR' -f -1h --raw | grep "Traceback"
+# Raw log lines piped to grep
+sumo search '_sourceCategory=prod/app/worker ERROR' -f -1h --raw -q | grep "Traceback"
 
-# Specific fields
-sumo search 'error' -f -24h --fields '_messagetime,_sourceCategory,_raw'
+# Specific fields as JSON
+sumo search 'error' -f -24h -o json -q --fields '_messagetime,_sourcecategory,_raw'
 
-# CSV export for spreadsheet
-sumo search 'error | count by _sourceCategory' -f -7d -o csv > errors.csv
+# CSV export
+sumo search 'error | count by _sourceCategory' -f -7d -o csv -q > errors.csv
+
+# Absolute time range
+sumo search 'error' -f 2026-03-17T14:00:00Z -t 2026-03-17T15:00:00Z -o json -q
 ```
+
+**Pagination note:** Each `sumo search` invocation creates a new search job. When using `--offset` across separate calls for manual pagination, results may differ between calls because each is an independent query.
 
 ### `sumo status`
 
@@ -247,6 +252,72 @@ sumo cancel <JOB_ID>
 
 ---
 
+## Query Syntax Reference
+
+Queries are passed as the `<QUERY>` argument. Use single quotes in shell to prevent pipe/wildcard expansion.
+
+### Filtering (before the pipe)
+
+```
+# By source category (case-sensitive)
+_sourceCategory=prod/app/worker
+
+# Wildcard source
+_sourceCategory=prod/app/*
+
+# By source host
+_sourceHost=web.1
+
+# Keyword search (AND is implicit)
+_sourceCategory=prod/app/worker error Traceback
+
+# Exact phrase
+"ServerError: service unavailable"
+
+# OR
+error OR warning OR critical
+
+# NOT
+error NOT "health check"
+```
+
+### Aggregation (after the pipe)
+
+Queries with a pipe (`|`) followed by an aggregation operator return **records** instead of raw messages.
+
+```
+# Count all matching messages
+* | count
+
+# Count by field
+error | count by _sourceCategory
+
+# Count by multiple fields
+error | count by _sourceCategory, _sourceHost
+
+# Top N
+error | count by _sourceCategory | top 10 _sourceCategory by _count
+
+# Time bucketing
+error | timeslice 1h | count by _timeslice
+
+# Parse fields from log text
+"status=" | parse "status=*" as status | count by status
+
+# Multiple aggregations
+error | count as total, min(_messagetime) as first_seen, max(_messagetime) as last_seen by _sourceCategory
+
+# Filter aggregated results
+error | count by _sourceCategory | where _count > 100
+
+# Sort
+error | count by _sourceCategory | sort by _count desc
+```
+
+**Recognized aggregation operators:** `count`, `sum`, `avg`, `min`, `max`, `first`, `last`, `pct`, `stddev`, `group`, `timeslice`, `top`, `sort`, `parse`, `where`, `limit`
+
+---
+
 ## Search Job Lifecycle
 
 The `sumo search` command manages the full Search Job API lifecycle internally:
@@ -263,7 +334,7 @@ The `sumo search` command manages the full Search Job API lifecycle internally:
 **Behavior:**
 - Poll every `--poll-interval` seconds (default 2s)
 - Show progress on stderr: `Searching... 1,234 messages found` (unless `--quiet`)
-- Aggregation detection: if the query contains a pipe (`|`) followed by an aggregation keyword (`count`, `sum`, `avg`, `min`, `max`, `first`, `last`, `pct`, `stddev`, `group by`), fetch records instead of messages
+- Aggregation detection: if the query contains a pipe (`|`) followed by a recognized aggregation operator, fetch records instead of messages
 - Auto-paginate: the API returns up to 10,000 results per page; if `--limit` exceeds a single page, fetch additional pages until the limit is reached
 - Always clean up (DELETE) the search job when done, even on Ctrl+C
 - Keep-alive: if `--poll-interval` exceeds 20s, override to 20s to prevent Sumo Logic session timeout
@@ -272,46 +343,113 @@ The `sumo search` command manages the full Search Job API lifecycle internally:
 
 ## Output Formats
 
+All output formats respect the `--fields` flag when provided, limiting output to the specified fields only.
+
 ### `text` (default)
 
-Human-readable table format:
+Human-readable table format. Messages are truncated to fit terminal width.
 
 ```
-TIME                     SOURCE                          MESSAGE
-2026-03-17 14:57:25 UTC  prod/plotzy/worker              EmptyResponseError: Empty response from Gemini
-2026-03-17 14:57:53 UTC  prod/plotzy/celery              Error finding information for GOMEZ ENTERPRISE: 2 validation errors
+TIME                     SOURCE  MESSAGE
+2026-03-17 14:57:25 UTC  heroku  EmptyResponseError: Empty response from Gemini...
+2026-03-17 14:57:53 UTC  heroku  Error finding information for GOMEZ ENTERPRISE: 2 validation errors...
 ```
 
 For aggregated queries:
 
 ```
-_SOURCECATEGORY              COUNT
-prod/plotzy/worker           47
-prod/plotzy/celery           23
-prod/plotzy/web              5
+_SOURCECATEGORY  _COUNT
+heroku           47
 ```
 
 ### `json`
 
-Array of objects, one per message/record:
+Array of objects, one per message/record. No truncation — all data is preserved.
 
 ```json
 [
   {
-    "_messagetime": "2026-03-17T14:57:25Z",
-    "_sourceCategory": "prod/plotzy/worker",
+    "_messagetime": "1773759851938",
+    "_sourcecategory": "heroku",
     "_raw": "EmptyResponseError: Empty response from Gemini..."
   }
 ]
 ```
+
+Note: `_messagetime` is an epoch millisecond timestamp. Field names from the v2 API are lowercase (e.g., `_sourcecategory`, not `_sourceCategory`). Query syntax still uses the camelCase form for filtering.
 
 ### `csv`
 
 Standard CSV with header row:
 
 ```csv
-_messagetime,_sourceCategory,_raw
-2026-03-17T14:57:25Z,prod/plotzy/worker,"EmptyResponseError: Empty response from Gemini..."
+_messagetime,_sourcecategory,_raw
+1773759851938,heroku,"EmptyResponseError: Empty response from Gemini..."
+```
+
+### Empty results
+
+When a query returns zero results:
+- Exit code is `0` (not an error)
+- `text` format: prints `No results found.` to stderr, nothing to stdout
+- `json` format: prints `[]` to stdout
+- `csv` format: prints nothing to stdout
+
+---
+
+## Agent Usage
+
+Guidance for AI agents (Claude Code, etc.) using the `sumo` CLI.
+
+### Recommended flags for agents
+
+Always use `-o json -q` when processing results programmatically:
+- `-o json` returns all fields without truncation
+- `-q` suppresses progress messages on stderr
+
+```bash
+sumo search 'error' -f -24h -o json -q
+```
+
+### Investigation workflow
+
+Start broad with aggregations, then drill into specifics:
+
+```bash
+# 1. What's the error landscape?
+sumo search 'error | count by _sourceCategory' -f -24h -o json -q
+
+# 2. Drill into the noisiest source
+sumo search '_sourceCategory=prod/app/worker error' -f -24h -l 20 -o json -q
+
+# 3. Get details on a specific error
+sumo search '_sourceCategory=prod/app/worker "ServerError"' -f -24h -l 10 -o json -q
+```
+
+### Limit guidance
+
+- **Aggregation queries** — limit doesn't affect server-side aggregation, use default
+- **Message queries** — use `-l 20` or `-l 50` for investigation, `-l 500` for bulk analysis
+- **Avoid `-l 10000`** unless exhaustive results are specifically needed
+
+### Quoting
+
+Always single-quote the query argument to prevent shell expansion of pipes and wildcards:
+
+```bash
+# Correct — single quotes protect the pipe
+sumo search 'error | count by _sourceCategory' -f -24h
+
+# Wrong — shell interprets the pipe
+sumo search error | count by _sourceCategory -f -24h
+```
+
+### Project selection
+
+When multiple accounts are configured, specify the project explicitly:
+
+```bash
+sumo search 'error' -f -24h -p prod -o json -q
 ```
 
 ---
@@ -337,7 +475,7 @@ _messagetime,_sourceCategory,_raw
 
 | Code | Meaning |
 |---|---|
-| 0 | Success |
+| 0 | Success (including queries with zero results) |
 | 1 | Error (auth, query, network, etc.) |
 | 2 | Invalid arguments / usage error |
 
@@ -363,10 +501,9 @@ cargo install --path .
 | Crate | Purpose |
 |---|---|
 | `clap` | Argument parsing with derive macros |
-| `reqwest` | HTTP client (blocking or async) |
+| `reqwest` | HTTP client (blocking, with cookie support) |
 | `serde` / `serde_json` | JSON serialization/deserialization |
 | `chrono` | Time parsing and relative time calculation |
-| `tokio` | Async runtime (if using async reqwest) |
 | `security-framework` | macOS Keychain access |
 | `dialoguer` | Interactive prompts for auth login |
 | `ctrlc` | Graceful Ctrl+C handling for job cleanup |

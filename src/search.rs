@@ -117,10 +117,9 @@ fn is_aggregate_query(query: &str) -> bool {
         let after_pipe = &query[pipe_pos + 1..].to_lowercase();
         let keywords = [
             "count", "sum", "avg", "min", "max", "first", "last", "pct", "stddev", "group",
+            "timeslice", "top", "sort", "parse", "where", "limit",
         ];
-        keywords.iter().any(|kw| {
-            after_pipe.contains(kw)
-        })
+        keywords.iter().any(|kw| after_pipe.contains(kw))
     } else {
         false
     }
@@ -239,17 +238,31 @@ fn poll_and_fetch(
     let is_agg = is_aggregate_query(&args.query);
     let results = fetch_results(api, job_id, args, is_agg)?;
 
-    // Output results
+    // Parse fields filter if provided
+    let fields: Option<Vec<String>> = args.fields.as_ref().map(|f| {
+        f.split(',').map(|s| s.trim().to_string()).collect()
+    });
+
+    // Apply field filtering then format output
+    let filtered = if let Some(ref field_list) = fields {
+        output::filter_fields(&results, field_list)
+    } else {
+        results
+    };
+
     if args.raw {
-        output::print_raw(&results);
-    } else if let Some(ref field_list) = args.fields {
-        let fields: Vec<String> = field_list.split(',').map(|s| s.trim().to_string()).collect();
-        output::print_fields(&results, &fields);
+        output::print_raw(&filtered);
     } else {
         match args.output.as_str() {
-            "json" => output::print_json(&results),
-            "csv" => output::print_csv(&results)?,
-            _ => output::print_text(&results, is_agg),
+            "json" => output::print_json(&filtered, fields.is_some()),
+            "csv" => output::print_csv(&filtered, fields.as_deref())?,
+            _ => {
+                if fields.is_some() {
+                    output::print_fields(&filtered, fields.as_ref().unwrap());
+                } else {
+                    output::print_text(&filtered, is_agg);
+                }
+            }
         }
     }
 
@@ -389,6 +402,11 @@ mod tests {
         assert!(is_aggregate_query("* | sum(bytes) by host"));
         assert!(is_aggregate_query("error | avg(latency)"));
         assert!(is_aggregate_query("error | group by host"));
+        assert!(is_aggregate_query("error | timeslice 1h | count by _timeslice"));
+        assert!(is_aggregate_query("error | count by _sourceCategory | top 10 _sourceCategory by _count"));
+        assert!(is_aggregate_query("error | count by _sourceCategory | sort by _count desc"));
+        assert!(is_aggregate_query("\"status=\" | parse \"status=*\" as status | count by status"));
+        assert!(is_aggregate_query("error | count by _sourceCategory | where _count > 100"));
         assert!(!is_aggregate_query("error"));
         assert!(!is_aggregate_query("_sourceCategory=prod error"));
         assert!(!is_aggregate_query("count something")); // no pipe
