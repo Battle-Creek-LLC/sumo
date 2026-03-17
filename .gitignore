@@ -1,0 +1,5 @@
+/target
+creds.txt
+*.swp
+*.swo
+.DS_Store
