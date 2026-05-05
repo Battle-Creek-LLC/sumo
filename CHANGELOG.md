@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] — 2026-05-05
+
+### Added
+
+- GitHub Actions release workflow (`.github/workflows/release.yml`).
+  Tagged releases (`v*`) now ship prebuilt binaries for Linux
+  (x86_64, aarch64), macOS (x86_64, aarch64), and Windows (x86_64).
+  Modeled on the workflow used by `repocat` in this org.
+
+### Changed
+
+- Switch `reqwest` from the default `native-tls` (OpenSSL) backend to
+  `rustls-tls`. Drops `openssl` and `native-tls` from the dependency
+  graph entirely, eliminates a recurring source of CVE noise, and lets
+  `aarch64-unknown-linux-gnu` cross-compile cleanly without vendored
+  OpenSSL. TLS trust roots now come from the bundled
+  [`webpki-roots`](https://crates.io/crates/webpki-roots) (Mozilla CA
+  list) instead of the OS trust store. For `api.sumologic.com` this
+  is transparent. If you talk to Sumo Logic through a corporate MITM
+  proxy whose CA is only in the OS trust store, you'll need to add it
+  via `SSL_CERT_FILE`.
+
 ## [0.1.1] — 2026-05-05
 
 ### Security
@@ -72,5 +94,6 @@ credential storage.
 - Environment-variable fallback (`SUMO_ACCESS_ID`, `SUMO_ACCESS_KEY`,
   `SUMO_API_ENDPOINT`) for CI and headless contexts.
 
+[0.1.2]: https://github.com/Battle-Creek-LLC/sumo/releases/tag/v0.1.2
 [0.1.1]: https://github.com/Battle-Creek-LLC/sumo/releases/tag/v0.1.1
 [0.1.0]: https://github.com/Battle-Creek-LLC/sumo/releases/tag/v0.1.0
