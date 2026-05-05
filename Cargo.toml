@@ -1,6 +1,6 @@
 [package]
 name = "bcl-sumo"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "A fast, minimal CLI for querying Sumo Logic logs"
 license = "MIT"
@@ -8,6 +8,11 @@ repository = "https://github.com/Battle-Creek-LLC/sumo"
 readme = "README.md"
 keywords = ["sumo-logic", "logs", "cli", "search"]
 categories = ["command-line-utilities"]
+
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/sumo-{ target }.tar.gz"
+pkg-fmt = "tgz"
+bin-dir = "sumo{ binary-ext }"
 
 [[bin]]
 name = "sumo"
