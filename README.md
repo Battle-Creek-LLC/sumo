@@ -15,7 +15,7 @@ $ sumo search 'error | count by _sourceCategory' -f -24h
 
 - **Simple search** — query logs with familiar Sumo Logic syntax
 - **Multiple output formats** — text tables, JSON, CSV, or raw log lines
-- **Keychain auth** — credentials stored securely in macOS Keychain
+- **Keychain auth** — credentials stored securely in the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager)
 - **Multiple projects** — switch between Sumo Logic accounts
 - **Agent-friendly** — designed for use with AI agents (`-o json -q`)
 - **Pipeline-ready** — `--raw` mode outputs one log line per message
@@ -97,7 +97,7 @@ sumo search 'error' -f -24h -o json -q --fields '_messagetime,_sourcecategory,_r
 
 ### Authentication
 
-Credentials are stored in the macOS Keychain.
+Credentials are stored in the OS keychain (macOS Keychain, Linux Secret Service / kernel keyutils, or Windows Credential Manager).
 
 ```bash
 # Interactive setup (prompts for deployment, access ID, access key)
@@ -157,7 +157,7 @@ Start broad with aggregations, then drill into specific sources and error messag
 
 ## Requirements
 
-- macOS (uses Keychain for credential storage)
+- macOS, Linux, or Windows (credentials are stored via the OS-native keychain)
 - A Sumo Logic account with API access
 - Rust toolchain (for building from source)
 

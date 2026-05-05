@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
     name = "sumo",
     about = "Query Sumo Logic logs from the terminal",
     long_about = "A fast CLI for querying Sumo Logic logs.\n\n\
-        Credentials are stored in the macOS Keychain. Run 'sumo auth login' to get started.\n\n\
+        Credentials are stored in the OS keychain. Run 'sumo auth login' to get started.\n\n\
         For AI agents: use '-o json -q' for machine-readable output without progress noise.\n\n\
         Examples:\n  \
         sumo search 'error' -f -24h\n  \
@@ -35,7 +35,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage authentication credentials stored in macOS Keychain
+    /// Manage authentication credentials stored in the OS keychain
     Auth {
         #[command(subcommand)]
         action: AuthCommands,
@@ -129,8 +129,8 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AuthCommands {
-    /// Store credentials in the macOS Keychain
-    #[command(long_about = "Store Sumo Logic credentials in the macOS Keychain.\n\n\
+    /// Store credentials in the OS keychain
+    #[command(long_about = "Store Sumo Logic credentials in the OS keychain.\n\n\
         Prompts interactively for deployment, access ID, and access key.\n\
         Pass all options (--endpoint, --access-id, --access-key) to skip prompts for scripted setup.")]
     Login {
