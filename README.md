@@ -15,7 +15,7 @@ $ sumo search 'error | count by _sourceCategory' -f -24h
 
 - **Simple search** — query logs with familiar Sumo Logic syntax
 - **Multiple output formats** — text tables, JSON, CSV, or raw log lines
-- **Keychain auth** — credentials stored securely in the OS keychain (macOS Keychain, Linux Secret Service, Windows Credential Manager)
+- **Config-file auth** — credentials stored in a TOML file (default `~/.config/sumo/config.toml`, mode `0600`)
 - **Multiple projects** — switch between Sumo Logic accounts
 - **Agent-friendly** — designed for use with AI agents (`-o json -q`)
 - **Pipeline-ready** — `--raw` mode outputs one log line per message
@@ -97,7 +97,7 @@ sumo search 'error' -f -24h -o json -q --fields '_messagetime,_sourcecategory,_r
 
 ### Authentication
 
-Credentials are stored in the OS keychain (macOS Keychain, Linux Secret Service / kernel keyutils, or Windows Credential Manager).
+Credentials are written to a TOML config file (default `~/.config/sumo/config.toml` on Linux, the platform equivalent elsewhere via the `directories` crate; the file is `chmod 0600` on Unix). Override the location with `$SUMO_CONFIG`.
 
 ```bash
 # Interactive setup (prompts for deployment, access ID, access key)
@@ -117,7 +117,23 @@ sumo auth list
 sumo auth status
 ```
 
-Environment variables (`SUMO_ACCESS_ID`, `SUMO_ACCESS_KEY`, `SUMO_API_ENDPOINT`) are supported as a fallback for CI/scripts.
+Resolution order for any single command: `--access-id`/`--access-key`/`--endpoint`/`--project` flags > environment (`SUMO_ACCESS_ID`, `SUMO_ACCESS_KEY`, `SUMO_API_ENDPOINT`, `SUMO_PROJECT`) > project entry in the config file > file defaults. Setting `$SUMO_CONFIG` points at an alternate file.
+
+Example `config.toml`:
+
+```toml
+default_project = "prod"
+
+[projects.prod]
+endpoint = "https://api.sumologic.com/api"
+access_id = "su1234567890"
+access_key = "..."
+
+[projects.staging]
+endpoint = "https://api.us2.sumologic.com/api"
+access_id = "suabcdef1234"
+access_key = "..."
+```
 
 ### Other Commands
 
@@ -157,7 +173,7 @@ Start broad with aggregations, then drill into specific sources and error messag
 
 ## Requirements
 
-- macOS, Linux, or Windows (credentials are stored via the OS-native keychain)
+- macOS, Linux, or Windows
 - A Sumo Logic account with API access
 - Rust toolchain (for building from source)
 

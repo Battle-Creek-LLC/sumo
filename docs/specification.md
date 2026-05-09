@@ -19,7 +19,7 @@ A fast, minimal command-line interface for querying Sumo Logic logs.
 
 ## Authentication
 
-Credentials are stored securely in the macOS Keychain and managed via the `sumo auth` command. Multiple projects (credential sets) are supported.
+Credentials are stored in a TOML config file (default `~/.config/sumo/config.toml`, override with `$SUMO_CONFIG`) and managed via the `sumo auth` command. Multiple projects (credential sets) are supported. On Unix the file is created with mode `0600`.
 
 ### Projects
 
@@ -30,20 +30,35 @@ A **project** is a named set of credentials (access ID, access key, endpoint). T
 
 ### Stored Credentials
 
-Credentials are stored in the macOS Keychain using the project name as a namespace:
+The config file uses TOML, keyed by project name:
 
-| Credential | Keychain Service Name | Description |
-|---|---|---|
-| Access ID | `com.sumologic.cli.<project>.access-id` | Sumo Logic Access ID |
-| Access Key | `com.sumologic.cli.<project>.access-key` | Sumo Logic Access Key |
-| API Endpoint | `com.sumologic.cli.<project>.endpoint` | Region-specific API base URL |
-| Active Project | `com.sumologic.cli.active-project` | Name of the currently active project |
+```toml
+default_project = "prod"
+
+[projects.prod]
+endpoint = "https://api.us2.sumologic.com/api"
+access_id = "su1a2B3cD4eF5g"
+access_key = "..."
+
+[projects.staging]
+endpoint = "https://api.eu.sumologic.com/api"
+access_id = "..."
+access_key = "..."
+```
+
+| Field | Description |
+|---|---|
+| `default_project` | Project used when `--project`/`SUMO_PROJECT` is not set |
+| `default_endpoint` | Optional fallback endpoint when a project does not define one |
+| `projects.<name>.access_id` | Sumo Logic Access ID |
+| `projects.<name>.access_key` | Sumo Logic Access Key |
+| `projects.<name>.endpoint` | Region-specific API base URL |
 
 Authentication uses HTTP Basic Auth (`access_id:access_key`).
 
 ### `sumo auth login`
 
-Store credentials in the macOS Keychain. Prompts interactively for each value.
+Store credentials in the config file. Prompts interactively for each value.
 
 ```
 sumo auth login [--project <name>]
@@ -62,7 +77,7 @@ Sumo Logic API Endpoint
 Select deployment [1-7]: 2
 Access ID: su1a2B3cD4eF5g
 Access Key: ********
-Credentials saved to keychain (project: prod).
+Credentials saved to /home/you/.config/sumo/config.toml (project: prod).
 ```
 
 Options:
@@ -78,14 +93,14 @@ When all options are provided, no interactive prompts are shown. This supports s
 
 ### `sumo auth logout`
 
-Remove stored credentials for a project from the Keychain.
+Remove stored credentials for a project from the config file.
 
 ```
 sumo auth logout [--project <name>]
 ```
 
 ```
-Credentials removed from keychain (project: prod).
+Credentials removed from /home/you/.config/sumo/config.toml (project: prod).
 ```
 
 Use `--all` to remove credentials for all projects.
@@ -135,18 +150,23 @@ Access Key: ****
 
 ### Project Selection Order
 
-For all commands, the project is resolved in this order:
+For all commands, the project name is resolved in this order:
 
-1. `--project <name>` flag (if provided on any command)
-2. Active project set via `sumo auth use`
-3. `default` project
+1. `--project <name>` flag
+2. `SUMO_PROJECT` environment variable
+3. `default_project` from the config file
+4. Literal `default`
 
-### Credential Lookup Order
+### Credential Resolution Order
 
-Once the project is resolved, credentials are looked up:
+Each individual credential field (`access_id`, `access_key`, `endpoint`) resolves independently, highest precedence first:
 
-1. macOS Keychain (primary)
-2. Environment variables `SUMO_ACCESS_ID`, `SUMO_ACCESS_KEY`, `SUMO_API_ENDPOINT` (fallback, for CI/scripts — ignores project selection)
+1. CLI flag (`--access-id`, `--access-key`, `--endpoint` — where applicable)
+2. Environment variables `SUMO_ACCESS_ID`, `SUMO_ACCESS_KEY`, `SUMO_API_ENDPOINT`
+3. Field on the resolved project entry in the config file
+4. `default_endpoint` (endpoint only) at the file root
+
+The config file location is resolved as: `$SUMO_CONFIG` > platform default (`~/.config/sumo/config.toml` on Linux, `~/Library/Application Support/com.battlecreek.sumo/config.toml` on macOS, `%APPDATA%\battlecreek\sumo\config\config.toml` on Windows).
 
 If no credentials are found, commands exit with: `Not authenticated. Run 'sumo auth login' to set up credentials.`
 
@@ -467,7 +487,8 @@ sumo search 'error' -f -24h -p prod -o json -q
 | Job state CANCELLED | Exit 1: `Search job was cancelled by the server.` |
 | Ctrl+C / SIGINT | Cancel the search job (DELETE), then exit |
 | Network error | Retry once after 2s, then exit 1 with error |
-| Keychain access denied | Exit 1: `Unable to access macOS Keychain. Check system permissions.` |
+| Config file unreadable | Exit 1: `parsing config file <path>: <reason>` (malformed TOML) or `reading config file <path>: <io error>` |
+| Config file unwritable | Exit 1: `writing config file <path>: <io error>` (e.g., permission denied) |
 
 ---
 
@@ -504,7 +525,8 @@ cargo install --path .
 | `reqwest` | HTTP client (blocking, with cookie support) |
 | `serde` / `serde_json` | JSON serialization/deserialization |
 | `chrono` | Time parsing and relative time calculation |
-| `security-framework` | macOS Keychain access |
+| `toml` | Parse/serialize the config file |
+| `directories` | Locate the platform config directory |
 | `dialoguer` | Interactive prompts for auth login |
 | `ctrlc` | Graceful Ctrl+C handling for job cleanup |
 | `comfy-table` | Text table formatting |

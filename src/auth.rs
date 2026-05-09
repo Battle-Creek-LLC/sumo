@@ -1,4 +1,4 @@
-use crate::keychain;
+use crate::config::{self, FileConfig, Overrides, Project, ResolvedConfig};
 use dialoguer::{Input, Password, Select};
 
 const DEPLOYMENTS: &[(&str, &str)] = &[
@@ -18,46 +18,15 @@ pub struct Credentials {
 }
 
 pub fn resolve_credentials(project_flag: Option<&str>) -> Result<Credentials, String> {
-    // Check env vars first as fallback
-    if let (Ok(id), Ok(key), Ok(endpoint)) = (
-        std::env::var("SUMO_ACCESS_ID"),
-        std::env::var("SUMO_ACCESS_KEY"),
-        std::env::var("SUMO_API_ENDPOINT"),
-    ) {
-        if project_flag.is_none() {
-            return Ok(Credentials { access_id: id, access_key: key, endpoint });
-        }
-    }
-
-    let project = match project_flag {
-        Some(p) => p.to_string(),
-        None => keychain::get_active_project()?,
-    };
-
-    let access_id = keychain::get(&project, "access-id")?;
-    let access_key = keychain::get(&project, "access-key")?;
-    let endpoint = keychain::get(&project, "endpoint")?;
-
-    match (access_id, access_key, endpoint) {
-        (Some(id), Some(key), Some(ep)) => Ok(Credentials {
-            access_id: id,
-            access_key: key,
-            endpoint: ep,
-        }),
-        _ => {
-            if project_flag.is_some() {
-                // Check if project exists at all
-                let projects = keychain::list_projects()?;
-                if !projects.contains(&project) {
-                    return Err(format!(
-                        "Project '{}' not found. Run 'sumo auth list' to see available projects.",
-                        project
-                    ));
-                }
-            }
-            Err("Not authenticated. Run 'sumo auth login' to set up credentials.".to_string())
-        }
-    }
+    let resolved = config::resolve(Overrides {
+        project: project_flag.map(String::from),
+        ..Overrides::default()
+    })?;
+    Ok(Credentials {
+        access_id: resolved.access_id,
+        access_key: resolved.access_key,
+        endpoint: resolved.endpoint,
+    })
 }
 
 pub fn login(
@@ -101,87 +70,114 @@ pub fn login(
             .map_err(|e| format!("Prompt error: {e}"))?,
     };
 
-    keychain::set(project, "endpoint", &ep)?;
-    keychain::set(project, "access-id", &id)?;
-    keychain::set(project, "access-key", &key)?;
-    keychain::add_project_to_registry(project)?;
+    let path = config::config_path(None)?;
+    let mut file = config::load_or_default(&path)?;
+    file.projects.insert(
+        project.to_string(),
+        Project {
+            access_id: Some(id),
+            access_key: Some(key),
+            endpoint: Some(ep),
+        },
+    );
+    if file.default_project.is_none() {
+        file.default_project = Some(project.to_string());
+    }
+    config::save_file(&path, &file)?;
 
-    eprintln!("Credentials saved to keychain (project: {project}).");
+    eprintln!(
+        "Credentials saved to {} (project: {project}).",
+        path.display()
+    );
     Ok(())
 }
 
 pub fn logout(project: &str, all: bool) -> Result<(), String> {
+    let path = config::config_path(None)?;
+    let mut file = config::load_or_default(&path)?;
+
     if all {
-        let projects = keychain::list_projects()?;
-        for p in &projects {
-            keychain::delete(p, "access-id")?;
-            keychain::delete(p, "access-key")?;
-            keychain::delete(p, "endpoint")?;
-            keychain::remove_project_from_registry(p)?;
-        }
-        eprintln!("All credentials removed from keychain.");
-    } else {
-        keychain::delete(project, "access-id")?;
-        keychain::delete(project, "access-key")?;
-        keychain::delete(project, "endpoint")?;
-        keychain::remove_project_from_registry(project)?;
-        eprintln!("Credentials removed from keychain (project: {project}).");
+        file.projects.clear();
+        file.default_project = None;
+        config::save_file(&path, &file)?;
+        eprintln!("All credentials removed from {}.", path.display());
+        return Ok(());
     }
+
+    if file.projects.remove(project).is_none() {
+        return Err(format!(
+            "Project '{project}' not found in {}.",
+            path.display()
+        ));
+    }
+    if file.default_project.as_deref() == Some(project) {
+        file.default_project = file.projects.keys().next().cloned();
+    }
+    config::save_file(&path, &file)?;
+    eprintln!(
+        "Credentials removed from {} (project: {project}).",
+        path.display()
+    );
     Ok(())
 }
 
 pub fn use_project(name: &str) -> Result<(), String> {
-    let projects = keychain::list_projects()?;
-    if !projects.contains(&name.to_string()) {
+    let path = config::config_path(None)?;
+    let mut file = config::load_or_default(&path)?;
+    if !file.projects.contains_key(name) {
         return Err(format!(
-            "Project '{}' not found. Run 'sumo auth list' to see available projects.",
-            name
+            "Project '{name}' not found. Run 'sumo auth list' to see available projects."
         ));
     }
-    keychain::set_active_project(name)?;
+    file.default_project = Some(name.to_string());
+    config::save_file(&path, &file)?;
     eprintln!("Switched to project: {name}");
     Ok(())
 }
 
 pub fn list() -> Result<(), String> {
-    let projects = keychain::list_projects()?;
-    if projects.is_empty() {
+    let path = config::config_path(None)?;
+    let file = config::load_or_default(&path)?;
+
+    if file.projects.is_empty() {
         eprintln!("No projects configured. Run 'sumo auth login' to get started.");
         return Ok(());
     }
 
-    let active = keychain::get_active_project()?;
+    let active = active_project(&file);
 
-    for p in &projects {
-        let marker = if *p == active { "*" } else { " " };
-        let endpoint = keychain::get(p, "endpoint")?.unwrap_or_default();
+    for (name, project) in &file.projects {
+        let marker = if Some(name.as_str()) == active.as_deref() {
+            "*"
+        } else {
+            " "
+        };
+        let endpoint = project.endpoint.clone().unwrap_or_default();
         let deployment = deployment_label(&endpoint);
-        println!("{marker} {:<12} {endpoint} ({deployment})", p);
+        println!("{marker} {:<12} {endpoint} ({deployment})", name);
     }
     Ok(())
 }
 
 pub fn status() -> Result<(), String> {
-    let active = keychain::get_active_project()?;
-    let endpoint = keychain::get(&active, "endpoint")?;
-    let access_id = keychain::get(&active, "access-id")?;
+    let resolved: ResolvedConfig = config::resolve(Overrides::default())?;
+    let deployment = deployment_label(&resolved.endpoint);
+    let masked_id = if resolved.access_id.len() > 8 {
+        format!("{}***", &resolved.access_id[..8])
+    } else {
+        resolved.access_id
+    };
+    println!("Project:    {}", resolved.project);
+    println!("Endpoint:   {} ({deployment})", resolved.endpoint);
+    println!("Access ID:  {masked_id}");
+    println!("Access Key: ****");
+    Ok(())
+}
 
-    match (endpoint, access_id) {
-        (Some(ep), Some(id)) => {
-            let deployment = deployment_label(&ep);
-            let masked_id = if id.len() > 8 {
-                format!("{}***", &id[..8])
-            } else {
-                id
-            };
-            println!("Project:    {active}");
-            println!("Endpoint:   {ep} ({deployment})");
-            println!("Access ID:  {masked_id}");
-            println!("Access Key: ****");
-            Ok(())
-        }
-        _ => Err("Not authenticated. Run 'sumo auth login' to set up credentials.".to_string()),
-    }
+fn active_project(file: &FileConfig) -> Option<String> {
+    file.default_project
+        .clone()
+        .or_else(|| file.projects.keys().next().cloned())
 }
 
 fn deployment_label(endpoint: &str) -> &'static str {

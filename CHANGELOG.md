@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING:** Replaced OS-keychain credential storage with a TOML
+  config file (default `~/.config/sumo/config.toml`, override with
+  `$SUMO_CONFIG`; created with mode `0600` on Unix). Previous keychain
+  entries are no longer read — re-run `sumo auth login` after upgrading.
+  The keychain backend failed in headless environments (containers,
+  CI, SSH sessions without DBus) and required pulling in a
+  platform-specific native dependency on Linux. The new layout mirrors
+  the pattern used by [`ddog`](https://github.com/Battle-Creek-LLC/ddog).
+- Credential resolution is now per-field: each of `access_id`,
+  `access_key`, and `endpoint` resolves independently with precedence
+  CLI flag > env var > project entry > file default. Previously the env
+  vars were all-or-nothing and only honored when `--project` was unset.
+- Added `SUMO_PROJECT` and `SUMO_CONFIG` environment variables.
+
+### Removed
+
+- `keyring` dependency (and its transitive `dbus` / Secret-Service
+  requirements on Linux). Replaced with `toml` + `directories`.
+
 ## [0.1.4] — 2026-05-05
 
 ### Added

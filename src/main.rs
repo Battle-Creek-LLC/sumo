@@ -1,5 +1,5 @@
 mod auth;
-mod keychain;
+mod config;
 mod search;
 mod output;
 mod time;
@@ -11,7 +11,7 @@ use clap::{Parser, Subcommand};
     name = "sumo",
     about = "Query Sumo Logic logs from the terminal",
     long_about = "A fast CLI for querying Sumo Logic logs.\n\n\
-        Credentials are stored in the OS keychain. Run 'sumo auth login' to get started.\n\n\
+        Credentials are stored in a TOML config file (default ~/.config/sumo/config.toml). Run 'sumo auth login' to get started.\n\n\
         For AI agents: use '-o json -q' for machine-readable output without progress noise.\n\n\
         Examples:\n  \
         sumo search 'error' -f -24h\n  \
@@ -35,7 +35,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Manage authentication credentials stored in the OS keychain
+    /// Manage authentication credentials stored in the config file
     Auth {
         #[command(subcommand)]
         action: AuthCommands,
@@ -129,10 +129,11 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum AuthCommands {
-    /// Store credentials in the OS keychain
-    #[command(long_about = "Store Sumo Logic credentials in the OS keychain.\n\n\
+    /// Store credentials in the config file
+    #[command(long_about = "Store Sumo Logic credentials in the config file (~/.config/sumo/config.toml by default).\n\n\
         Prompts interactively for deployment, access ID, and access key.\n\
-        Pass all options (--endpoint, --access-id, --access-key) to skip prompts for scripted setup.")]
+        Pass all options (--endpoint, --access-id, --access-key) to skip prompts for scripted setup.\n\
+        Override the file location with $SUMO_CONFIG.")]
     Login {
         /// Project name (for managing multiple accounts)
         #[arg(long, default_value = "default")]
@@ -151,7 +152,7 @@ enum AuthCommands {
         access_key: Option<String>,
     },
 
-    /// Remove credentials from the Keychain
+    /// Remove credentials from the config file
     Logout {
         /// Project name to remove
         #[arg(long, default_value = "default")]
